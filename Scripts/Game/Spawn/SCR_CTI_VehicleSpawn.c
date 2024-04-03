@@ -6,8 +6,6 @@ class SCR_CTI_VehicleSpawnClass : GenericEntityClass
 class SCR_CTI_VehicleSpawn : GenericEntity
 {
 	protected Vehicle m_spawnedVehicle;
-	
-	protected ref array<IEntity> m_items = {};
 
 	//------------------------------------------------------------------------------------------------
 	void spawnPrefab(ResourceName resName)
@@ -34,9 +32,8 @@ class SCR_CTI_VehicleSpawn : GenericEntity
 			Physics physicsComponent = m_spawnedVehicle.GetPhysics();
 			if (physicsComponent) physicsComponent.SetVelocity("0 -1 0");
 
-			if (m_items) insertItem(m_spawnedVehicle);
-		
-			removeSupplyBoxes(m_spawnedVehicle);
+			SCR_ResourceContainer resContainer = FindVehicleResourceContainer(newEnt, EResourceType.SUPPLIES);
+			if (resContainer) resContainer.SetResourceValue(0.0, false);
 
 			ChimeraWorld world = newEnt.GetWorld();
 			GarbageSystem garbageSystem = world.GetGarbageSystem();
@@ -99,71 +96,56 @@ class SCR_CTI_VehicleSpawn : GenericEntity
 			}
 			//PrintFormat("CTI :: DEBUG :: Vehicle in garbage manager: %1 (%2)", garbageSystem.IsInserted(newEnt).ToString(), resName);
 			//PrintFormat("CTI :: DEBUG :: Lifetime: %1 (%2)", garbageSystem.GetLifetime(newEnt), resName);
-	
-			if (m_items) m_items.Clear();
-			m_items = null;
 		} else {
 			Print("CTI :: DEBUG :: VehicleSpawner did not created vehicle!");
 		}
 	}
 
 	//------------------------------------------------------------------------------------------------
-	void addItemPrefab(ResourceName prefab)
-	{
-		Resource res = Resource.Load(prefab);
-		IEntity item = GetGame().SpawnEntityPrefab(res, GetWorld());
-		m_items.Insert(item);
-	}
-
-	//------------------------------------------------------------------------------------------------
 	void addItemsPrefab(map<ResourceName, int> prefabMap)
 	{
+		if (!m_spawnedVehicle) return;
+		
+		InventoryStorageManagerComponent ismc = InventoryStorageManagerComponent.Cast(m_spawnedVehicle.FindComponent(SCR_VehicleInventoryStorageManagerComponent));
+		if (!ismc) return;
+		
+		UniversalInventoryStorageComponent uisc = UniversalInventoryStorageComponent.Cast(m_spawnedVehicle.FindComponent(UniversalInventoryStorageComponent));
+		if (!uisc) return;
+
 		foreach (ResourceName prefab, int piece : prefabMap)
 		{
-			Resource res = Resource.Load(prefab);
 			for (int i = 0; i < piece; i++)
 			{
-				IEntity item = GetGame().SpawnEntityPrefab(res, GetWorld());
-				m_items.Insert(item);
+				ismc.TrySpawnPrefabToStorage(prefab, uisc);
 			}
 		}
 	}
 
 	//------------------------------------------------------------------------------------------------
-	protected void insertItem(Vehicle veh)
+	// BI code from GarbageSystem
+	protected SCR_ResourceContainer FindVehicleResourceContainer(notnull IEntity entity, EResourceType resourceType)
 	{
-		InventoryStorageManagerComponent ismc = InventoryStorageManagerComponent.Cast(veh.FindComponent(SCR_VehicleInventoryStorageManagerComponent));
-		UniversalInventoryStorageComponent uisc = UniversalInventoryStorageComponent.Cast(veh.FindComponent(UniversalInventoryStorageComponent));
-
-		foreach (IEntity item : m_items)
+		SCR_ResourceComponent resourceComponent = SCR_ResourceComponent.Cast(entity.FindComponent(SCR_ResourceComponent));
+		if (!resourceComponent)
 		{
-			//ismc.TryInsertItem(item); // Items may stacked
-			ismc.TryInsertItemInStorage(item, uisc);
-		}
-	}
+			SlotManagerComponent slotManager = SlotManagerComponent.Cast(entity.FindComponent(SlotManagerComponent));
+			if (!slotManager)
+				return null;
 
-	//------------------------------------------------------------------------------------------------
-	protected void removeSupplyBoxes(Vehicle veh)
-	{
-		IEntity child = veh.GetChildren();
-		while (child)
-		{
-		    SCR_ResourceComponent resourceComponent = SCR_ResourceComponent.Cast(child.FindComponent(SCR_ResourceComponent));
-		    if (resourceComponent)
-		    {
-		        array<SCR_ResourceContainer> containers = resourceComponent.GetContainers();
-				if (containers)
-				{
-					foreach(SCR_ResourceContainer rc : containers)
-					{
-			            // Force change value event (TODO need test after updates, maybe not need)
-			            rc.SetResourceValue(100, false);
-			            rc.SetResourceValue(0, false);
-			        }
-				}
-		    }
-		
-		    child = child.GetSibling();
+			EntitySlotInfo slot = slotManager.GetSlotByName("Cargo");
+			if (!slot)
+				return null;
+
+			entity = slot.GetAttachedEntity();
+			if (!entity)
+				return null;
+
+			resourceComponent = SCR_ResourceComponent.Cast(entity.FindComponent(SCR_ResourceComponent));
 		}
+
+		if (!resourceComponent)
+			return null;
+
+		return resourceComponent.GetContainer(resourceType);
 	}
 };
